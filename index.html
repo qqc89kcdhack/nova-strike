@@ -1057,6 +1057,7 @@ class GameScene extends Phaser.Scene {
 
   _afterBriefing(n) {
     if (n % 5 === 0 && n <= 15) {
+      this.bossMode = true;  // Lock wave progress immediately
       this._showBossWarning(n, () => this._spawnBoss(n));
       return;
     }
