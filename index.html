@@ -11,8 +11,12 @@
 html, body {
   width: 100%; height: 100%;
   background: #000005;
-  display: flex; justify-content: center; align-items: center;
   overflow: hidden;
+}
+/* PC: center */
+body {
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
 }
 canvas {
   box-shadow:
@@ -30,9 +34,70 @@ body::after {
   );
   pointer-events: none; z-index: 9999;
 }
+/* Mobile control panel */
+#ctrl-panel {
+  display: none;
+  width: 100%; flex-shrink: 0;
+  background: #05080f;
+  border-top: 1px solid rgba(0,255,255,0.15);
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+#ctrl-panel .ctrl-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px; height: 100%;
+}
+#joy-zone {
+  width: 140px; height: 140px; position: relative;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,255,255,0.06) 0%, transparent 70%);
+}
+#joy-base {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%,-50%);
+  width: 100px; height: 100px; border-radius: 50%;
+  border: 2px solid rgba(0,255,255,0.2);
+}
+#joy-knob {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%,-50%);
+  width: 46px; height: 46px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,255,255,0.5), rgba(0,255,255,0.15));
+  border: 2px solid rgba(0,255,255,0.5);
+  transition: none;
+}
+.ctrl-buttons { display: flex; gap: 14px; align-items: center; }
+.ctrl-btn {
+  border-radius: 50%; border: 2px solid; display: flex;
+  justify-content: center; align-items: center;
+  font-family: 'Orbitron', monospace; font-weight: 700;
+  pointer-events: auto; touch-action: none;
+}
+.ctrl-btn.fire {
+  width: 80px; height: 80px; font-size: 13px;
+  color: #ff00ff; border-color: rgba(255,0,255,0.5);
+  background: radial-gradient(circle, rgba(255,0,255,0.2), transparent 70%);
+}
+.ctrl-btn.fire.active { background: radial-gradient(circle, rgba(255,0,255,0.5), rgba(255,0,255,0.1) 70%); }
+.ctrl-btn.bomb {
+  width: 58px; height: 58px; font-size: 10px;
+  color: #ffee00; border-color: rgba(255,238,0,0.4);
+  background: radial-gradient(circle, rgba(255,238,0,0.12), transparent 70%);
+}
+.ctrl-btn.bomb.active { background: radial-gradient(circle, rgba(255,238,0,0.4), rgba(255,238,0,0.1) 70%); }
 </style>
 </head>
 <body>
+
+<div id="game-container"></div>
+<div id="ctrl-panel">
+  <div class="ctrl-row">
+    <div id="joy-zone"><div id="joy-base"><div id="joy-knob"></div></div></div>
+    <div class="ctrl-buttons">
+      <div class="ctrl-btn bomb" id="btn-bomb">BOMB</div>
+      <div class="ctrl-btn fire" id="btn-fire">FIRE</div>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
 <script>
@@ -40,6 +105,101 @@ body::after {
 
 const W = 480, H = 720;
 const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || ('ontouchstart' in window);
+
+// ── Global touch input state (HTML controls → Phaser) ──────────
+const TOUCH_INPUT = { dx: 0, dy: 0, fire: false, bomb: false, _bombPrev: false, bombJust: false };
+
+if (IS_MOBILE) {
+  document.addEventListener('DOMContentLoaded', () => {
+    const panel = document.getElementById('ctrl-panel');
+    const container = document.getElementById('game-container');
+    panel.style.display = 'block';
+    // Layout: game on top, controls at bottom
+    document.body.style.justifyContent = 'flex-start';
+    const resize = () => {
+      const ctrlH = Math.min(170, window.innerHeight * 0.22);
+      panel.style.height = ctrlH + 'px';
+      container.style.height = (window.innerHeight - ctrlH) + 'px';
+      container.style.width = '100%';
+      container.style.display = 'flex';
+      container.style.justifyContent = 'center';
+      container.style.alignItems = 'center';
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    // ── Joystick ──
+    const joyZone = document.getElementById('joy-zone');
+    const joyKnob = document.getElementById('joy-knob');
+    const joyBase = document.getElementById('joy-base');
+    let joyId = null, joyCenter = { x: 0, y: 0 };
+    const JR = 50; // max radius
+
+    joyZone.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const t = e.changedTouches[0];
+      joyId = t.identifier;
+      const rect = joyZone.getBoundingClientRect();
+      joyCenter.x = rect.left + rect.width / 2;
+      joyCenter.y = rect.top + rect.height / 2;
+      _joyMove(t);
+    }, { passive: false });
+
+    document.addEventListener('touchmove', (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === joyId) { _joyMove(t); break; }
+      }
+    }, { passive: false });
+
+    document.addEventListener('touchend', (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === joyId) {
+          joyId = null;
+          TOUCH_INPUT.dx = 0; TOUCH_INPUT.dy = 0;
+          joyKnob.style.transform = 'translate(-50%,-50%)';
+          break;
+        }
+      }
+    });
+
+    function _joyMove(t) {
+      let dx = t.clientX - joyCenter.x;
+      let dy = t.clientY - joyCenter.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const clamped = Math.min(dist, JR);
+      const angle = Math.atan2(dy, dx);
+      const nx = Math.cos(angle) * clamped;
+      const ny = Math.sin(angle) * clamped;
+      joyKnob.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
+      TOUCH_INPUT.dx = (clamped / JR) * Math.cos(angle);
+      TOUCH_INPUT.dy = (clamped / JR) * Math.sin(angle);
+    }
+
+    // ── Fire button ──
+    const btnFire = document.getElementById('btn-fire');
+    btnFire.addEventListener('touchstart', (e) => {
+      e.preventDefault(); TOUCH_INPUT.fire = true; btnFire.classList.add('active');
+    }, { passive: false });
+    btnFire.addEventListener('touchend', (e) => {
+      TOUCH_INPUT.fire = false; btnFire.classList.remove('active');
+    });
+    btnFire.addEventListener('touchcancel', () => {
+      TOUCH_INPUT.fire = false; btnFire.classList.remove('active');
+    });
+
+    // ── Bomb button ──
+    const btnBomb = document.getElementById('btn-bomb');
+    btnBomb.addEventListener('touchstart', (e) => {
+      e.preventDefault(); TOUCH_INPUT.bomb = true; btnBomb.classList.add('active');
+    }, { passive: false });
+    btnBomb.addEventListener('touchend', () => {
+      TOUCH_INPUT.bomb = false; btnBomb.classList.remove('active');
+    });
+    btnBomb.addEventListener('touchcancel', () => {
+      TOUCH_INPUT.bomb = false; btnBomb.classList.remove('active');
+    });
+  });
+}
 
 const C = {
   BG:      0x00010f,
@@ -812,9 +972,7 @@ class GameScene extends Phaser.Scene {
     // ── Input ────────────────────────────────────────────────────
     this.cursors = this.input.keyboard.createCursorKeys();
     this.keys    = this.input.keyboard.addKeys('W,A,S,D,SPACE,Z');
-    this.touch   = new TouchControls(this);
-
-    // Mobile: tap to advance dialog
+    // Mobile: tap canvas to advance dialog
     if (IS_MOBILE) {
       this.input.on('pointerdown', () => {
         if (this.dialogActive) this.dialog.advance();
@@ -1131,7 +1289,6 @@ class GameScene extends Phaser.Scene {
     if (wave === 15) {
       // Final boss → Ending
       this.time.delayedCall(2000, () => {
-        if (this.touch) this.touch.destroy();
         this.cameras.main.fadeOut(1200, 0, 0, 0);
         this.time.delayedCall(1200, () => this.scene.start('Ending', { score: this.score }));
       });
@@ -1182,7 +1339,6 @@ class GameScene extends Phaser.Scene {
 
   _endGame() {
     this.over = true;
-    if (this.touch) this.touch.destroy();
     this.cameras.main.fadeOut(800, 0, 0, 0);
     this.time.delayedCall(800, () =>
       this.scene.start('GameOver', { score: this.score, wave: this.wave })
@@ -1235,8 +1391,11 @@ class GameScene extends Phaser.Scene {
   _updateInput(s, dt) {
     const p = this.player;
     const K = this.keys, Cur = this.cursors;
-    const T = this.touch;
-    T.update();
+    const T = TOUCH_INPUT;
+
+    // Bomb just-pressed detection
+    T.bombJust = T.bomb && !T._bombPrev;
+    T._bombPrev = T.bomb;
 
     // Dialog: Space or tap advances, everything else blocked
     if (this.dialogActive) {
@@ -1251,8 +1410,8 @@ class GameScene extends Phaser.Scene {
     if (K.D.isDown || Cur.right.isDown) dx += 1;
     if (K.W.isDown || Cur.up.isDown)    dy -= 1;
     if (K.S.isDown || Cur.down.isDown)  dy += 1;
-    // Touch joystick
-    if (T.active && (Math.abs(T.dx) > 0.1 || Math.abs(T.dy) > 0.1)) {
+    // Touch joystick (HTML controls)
+    if (IS_MOBILE && (Math.abs(T.dx) > 0.1 || Math.abs(T.dy) > 0.1)) {
       dx += T.dx; dy += T.dy;
     }
     const len = Math.sqrt(dx * dx + dy * dy);
@@ -1264,7 +1423,7 @@ class GameScene extends Phaser.Scene {
 
     const fr = this.wepLv === 3 ? 95 : this.wepLv === 2 ? 135 : 175;
     p.cooldown -= dt;
-    const firing = K.SPACE.isDown || Cur.space?.isDown || T.fireDown;
+    const firing = K.SPACE.isDown || Cur.space?.isDown || T.fire;
     if (firing && p.cooldown <= 0) {
       this._playerShoot(); p.cooldown = fr;
     }
@@ -1830,164 +1989,11 @@ class EndingScene extends Phaser.Scene {
 }
 
 // ================================================================
-//  MOBILE TOUCH CONTROLS
-// ================================================================
-class TouchControls {
-  constructor(scene) {
-    this.scene = scene;
-    this.dx = 0; this.dy = 0;   // joystick direction (-1 ~ 1)
-    this.fireDown = false;
-    this.bombJust = false;
-    this._bombWas = false;
-    this.active = IS_MOBILE;
-    if (!this.active) return;
-
-    this.g = scene.add.graphics().setDepth(100).setAlpha(0.5);
-
-    // Joystick state
-    this.joyBase = { x: 100, y: H - 130 };
-    this.joyRadius = 55;
-    this.joyKnob = { x: this.joyBase.x, y: this.joyBase.y };
-    this.joyId = null;
-
-    // Fire button
-    this.fireBtn = { x: W - 90, y: H - 130, r: 40 };
-    this.fireId = null;
-
-    // Bomb button
-    this.bombBtn = { x: W - 90, y: H - 230, r: 28 };
-    this.bombId = null;
-    this._bombDown = false;
-
-    // Touch handlers
-    scene.input.on('pointerdown', (p) => this._onDown(p));
-    scene.input.on('pointermove', (p) => this._onMove(p));
-    scene.input.on('pointerup',   (p) => this._onUp(p));
-
-    // Enable multi-touch
-    scene.input.addPointer(2);
-  }
-
-  _onDown(p) {
-    const px = p.x, py = p.y;
-    // Left half → joystick
-    if (px < W / 2 && this.joyId === null) {
-      this.joyId = p.id;
-      this.joyBase.x = px; this.joyBase.y = py;
-      this.joyKnob.x = px; this.joyKnob.y = py;
-      return;
-    }
-    // Bomb button
-    if (this._inCircle(px, py, this.bombBtn)) {
-      this.bombId = p.id;
-      this._bombDown = true;
-      return;
-    }
-    // Fire button (right half)
-    if (px >= W / 2) {
-      this.fireId = p.id;
-      this.fireDown = true;
-    }
-  }
-
-  _onMove(p) {
-    if (p.id === this.joyId) {
-      const dx = p.x - this.joyBase.x;
-      const dy = p.y - this.joyBase.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const clamped = Math.min(dist, this.joyRadius);
-      const angle = Math.atan2(dy, dx);
-      this.joyKnob.x = this.joyBase.x + Math.cos(angle) * clamped;
-      this.joyKnob.y = this.joyBase.y + Math.sin(angle) * clamped;
-      this.dx = (clamped / this.joyRadius) * Math.cos(angle);
-      this.dy = (clamped / this.joyRadius) * Math.sin(angle);
-    }
-  }
-
-  _onUp(p) {
-    if (p.id === this.joyId) {
-      this.joyId = null;
-      this.dx = 0; this.dy = 0;
-      this.joyKnob.x = this.joyBase.x; this.joyKnob.y = this.joyBase.y;
-    }
-    if (p.id === this.fireId) {
-      this.fireId = null;
-      this.fireDown = false;
-    }
-    if (p.id === this.bombId) {
-      this.bombId = null;
-      this._bombDown = false;
-    }
-  }
-
-  _inCircle(px, py, btn) {
-    const dx = px - btn.x, dy = py - btn.y;
-    return dx * dx + dy * dy <= btn.r * btn.r * 1.5;
-  }
-
-  update() {
-    // Bomb: detect "just pressed"
-    this.bombJust = this._bombDown && !this._bombWas;
-    this._bombWas = this._bombDown;
-
-    if (!this.active) return;
-    const g = this.g;
-    g.clear();
-
-    // Draw joystick base
-    if (this.joyId !== null) {
-      g.lineStyle(2, C.CYAN, 0.3);
-      g.strokeCircle(this.joyBase.x, this.joyBase.y, this.joyRadius);
-      g.fillStyle(C.CYAN, 0.4);
-      g.fillCircle(this.joyKnob.x, this.joyKnob.y, 22);
-    } else {
-      // Hint circle
-      g.lineStyle(1, C.CYAN, 0.15);
-      g.strokeCircle(this.joyBase.x, this.joyBase.y, this.joyRadius);
-      g.fillStyle(C.CYAN, 0.1);
-      g.fillCircle(this.joyBase.x, this.joyBase.y, 18);
-    }
-
-    // Fire button
-    const fc = this.fireDown ? 0.5 : 0.25;
-    g.fillStyle(C.MAGENTA, fc);
-    g.fillCircle(this.fireBtn.x, this.fireBtn.y, this.fireBtn.r);
-    g.lineStyle(2, C.MAGENTA, 0.5);
-    g.strokeCircle(this.fireBtn.x, this.fireBtn.y, this.fireBtn.r);
-
-    // Bomb button
-    const bc = this._bombDown ? 0.5 : 0.2;
-    g.fillStyle(C.YELLOW, bc);
-    g.fillCircle(this.bombBtn.x, this.bombBtn.y, this.bombBtn.r);
-    g.lineStyle(2, C.YELLOW, 0.4);
-    g.strokeCircle(this.bombBtn.x, this.bombBtn.y, this.bombBtn.r);
-
-    // Labels
-    this._label('FIRE', this.fireBtn.x, this.fireBtn.y, C.MAGENTA);
-    this._label('BOMB', this.bombBtn.x, this.bombBtn.y, C.YELLOW);
-  }
-
-  _label(txt, x, y, color) {
-    // Use graphics text trick - draw via scene text cache
-    if (!this['_lbl_' + txt]) {
-      const hex = '#' + color.toString(16).padStart(6, '0');
-      this['_lbl_' + txt] = this.scene.add.text(x, y, txt, {
-        fontFamily: 'Orbitron, monospace', fontSize: '10px', color: hex,
-      }).setOrigin(0.5).setDepth(101).setAlpha(0.7);
-    }
-  }
-
-  destroy() {
-    if (this.g) this.g.destroy();
-    ['FIRE', 'BOMB'].forEach(k => { if (this['_lbl_' + k]) this['_lbl_' + k].destroy(); });
-  }
-}
-
-// ================================================================
 //  PHASER CONFIG
 // ================================================================
 new Phaser.Game({
   type: Phaser.AUTO,
+  parent: 'game-container',
   width: W, height: H,
   backgroundColor: '#00010f',
   scene: [TitleScene, GameScene, GameOverScene, EndingScene],
@@ -1995,7 +2001,6 @@ new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  input: { activePointers: 4 },
   render: { antialias: true, pixelArt: false },
 });
 </script>
