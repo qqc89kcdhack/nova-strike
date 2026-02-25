@@ -559,7 +559,7 @@ class DialogUI {
     this.waitingForInput = false;
     this.onDone = null;
 
-    const BX = 20, BY = H - 190, BW = W - 40, BH = 168;
+    const BX = 20, BY = H - 210, BW = W - 40, BH = 168;
     this.BX = BX; this.BY = BY; this.BW = BW; this.BH = BH;
     const PX = BX + 36, PY = BY + BH / 2;
     const TX = BX + 78, TY = BY + 10;
@@ -792,7 +792,7 @@ class CommUI {
 
     const BW = 255, BH = 54;
     this.BX = W - BW - 12;
-    this.BY = H - BH - 180;
+    this.BY = H - BH - 200;
     this.BW = BW; this.BH = BH;
 
     this.gfx  = scene.add.graphics().setDepth(45).setAlpha(0);
