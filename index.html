@@ -1670,7 +1670,7 @@ class GameScene extends Phaser.Scene {
   }
 
   _updateWaveProgress(dt) {
-    if (this.bossMode || this.waveCleared || this.spawnQ.length > 0 || this.enemies.length > 0) return;
+    if (this.bossMode || this.waveCleared || this.dialogActive || this.spawnQ.length > 0 || this.enemies.length > 0) return;
     this.waveWait += dt;
     if (this.waveWait > 1800) {
       this.waveCleared = true;
