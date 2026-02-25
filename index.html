@@ -1588,52 +1588,469 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  // ── Boss dispatcher ─────────────────────────────────────
   _updateBoss(s, dt) {
     const b = this.boss;
     if (!b) return;
     b.t += dt;
+    // 降下中は共通
     if (b.y < b.targetY) { b.y += b.vy; return; }
     if (b.phase === 0) { b.phase = 1; SFX.bossAlert(); }
-    if (b.hp < b.maxHp * 0.38 && b.phase === 1) {
-      b.phase = 2;
+    // ボス別ロジックへ分岐
+    if (this.wave === 5)       this._updateBossGuardian(b, s, dt);
+    else if (this.wave === 10) this._updateBossOracle(b, s, dt);
+    else if (this.wave === 15) this._updateBossNexus(b, s, dt);
+    else                       this._updateBossDefault(b, s, dt);
+  }
+
+  // ── GUARDIAN (Wave 5) — 近距離突進型 ────────────────────
+  _updateBossGuardian(b, s, dt) {
+    const hpPct = b.hp / b.maxHp;
+    // Phase遷移
+    if (hpPct < 0.6 && b.phase === 1) {
+      b.phase = 2; b.targetY = 200;
       this._floatText(W / 2, H / 2, '—  ENRAGED  —', '#ff2244');
       this._shake(20, 500);
-      // ボス後半突入時のセリフ
-      const bossData = STORY_DATA.bosses[this.wave];
-      if (bossData && bossData.rageLine) {
-        this.comms.send(bossData.name, bossData.rageLine, 5);
+      const bd = STORY_DATA.bosses[this.wave];
+      if (bd && bd.rageLine) this.comms.send(bd.name, bd.rageLine, 5);
+    }
+    if (hpPct < 0.3 && b.phase === 2) {
+      b.phase = 3; b.targetY = 250;
+      this._floatText(W / 2, H / 2, '—  OVERDRIVE  —', '#ff4400');
+      this._shake(28, 600);
+    }
+    // 状態初期化
+    if (b.charging == null) {
+      b.charging = false; b.chargePhase = 0; b.chargeTimer = 0;
+      b.chargeCooldown = 0; b.chargeTarget = {x:0,y:0}; b.chargeReturn = {x:0,y:0};
+      b.mines = []; b.spiralAngle = 0;
+    }
+    // 設置弾(mine)更新
+    for (let i = b.mines.length - 1; i >= 0; i--) {
+      const m = b.mines[i]; m.timer -= dt;
+      if (m.timer <= 0) {
+        for (let a = 0; a < 8; a++) this._fireEBullet(m.x, m.y, (a/8)*Math.PI*2, 155, 0x66ccff);
+        this._shake(6, 150); b.mines.splice(i, 1);
       }
     }
-    const spd = b.phase === 2 ? 2.2 : 1.4;
-    b.x = W / 2 + Math.sin(b.t * 0.001 * spd) * (W * 0.34);
+    // 移動
+    if (b.charging) {
+      const ct = b.chargeTarget;
+      const cspd = b.phase === 3 ? 650 : 460;
+      if (b.chargePhase === 0) {
+        const dx = ct.x - b.x, dy = ct.y - b.y;
+        const dist = Math.sqrt(dx*dx+dy*dy);
+        if (dist < 20) {
+          b.chargePhase = 1; b.chargeTimer = 200;
+          if (b.phase >= 2) b.mines.push({x:b.x, y:b.y, timer:1500});
+        } else {
+          b.x += (dx/dist)*cspd*s; b.y += (dy/dist)*cspd*s;
+          b.chargeTimer += dt;
+          if (b.chargeTimer > 80) {
+            b.chargeTimer = 0;
+            if (b.phase === 3) {
+              for (let a = 0; a < 5; a++) this._fireEBullet(b.x, b.y, Math.random()*Math.PI*2, 110+Math.random()*70, b.mc);
+            } else {
+              const ma = Math.atan2(dy, dx);
+              this._fireEBullet(b.x, b.y, ma+Math.PI/2, 145, b.mc);
+              this._fireEBullet(b.x, b.y, ma-Math.PI/2, 145, b.mc);
+            }
+          }
+        }
+      } else {
+        b.chargeTimer -= dt;
+        if (b.chargeTimer <= 0) {
+          const rx = b.chargeReturn.x, ry = b.chargeReturn.y;
+          const dx = rx-b.x, dy = ry-b.y, dist = Math.sqrt(dx*dx+dy*dy);
+          if (dist < 15) { b.charging = false; b.chargeCooldown = b.phase===3?1200:b.phase===2?2000:3000; }
+          else { b.x += (dx/dist)*300*s; b.y += (dy/dist)*300*s; }
+        }
+      }
+    } else {
+      if (Math.abs(b.y - b.targetY) > 2) b.y += (b.targetY - b.y) * 0.02;
+      if (b.phase === 1) b.x = W/2 + Math.sin(b.t*0.0018)*(W*0.38);
+      else if (b.phase === 2) b.x = W/2 + Math.sin(b.t*0.0022)*(W*0.32);
+      else { b.x = W/2 + Math.sin(b.t*0.0035)*( W*0.35); b.y = b.targetY + Math.sin(b.t*0.0025)*80; }
+      b.chargeCooldown -= dt;
+      if (b.chargeCooldown <= 0) {
+        const freq = b.phase===3?2:b.phase===2?3:4;
+        if (b.atkIdx % freq === freq-1) {
+          b.charging = true; b.chargePhase = 0; b.chargeTimer = 0;
+          b.chargeReturn = {x:b.x, y:b.y};
+          b.chargeTarget = {x:this.player.x, y:Math.min(this.player.y-40, H*0.75)};
+          this._shake(8, 200);
+        }
+      }
+    }
+    b.x = Math.max(b.w/2, Math.min(W-b.w/2, b.x));
+    b.y = Math.max(40, Math.min(H*0.8, b.y));
+    // 攻撃
+    if (!b.charging) {
+      b.atkTimer -= dt;
+      if (b.atkTimer <= 0) {
+        const pat = b.atkIdx % (b.phase===3?5:b.phase===2?4:3);
+        if (pat === 0) {
+          // 高速3連狙い撃ち
+          for (let k=0;k<3;k++) this.time.delayedCall(k*100, ()=>{ if(this.boss) this._aimAtPlayer(this.boss.x, this.boss.y+28, 310, this.boss.mc); });
+        } else if (pat === 1) {
+          // Vフォーメーション弾
+          const ba = Math.atan2(this.player.y-b.y, this.player.x-b.x);
+          [-0.7,-0.35,0,0.35,0.7].forEach((off,i)=>this._fireEBullet(b.x, b.y+28, ba+off, [270,230,260,230,270][i], b.mc));
+        } else if (pat === 2) {
+          // サイド付き狙い撃ち
+          this._aimAtPlayer(b.x, b.y+28, 280, b.mc);
+          this._fireEBullet(b.x-30, b.y+20, Math.PI*0.6, 175, b.ac);
+          this._fireEBullet(b.x+30, b.y+20, Math.PI*0.4, 175, b.ac);
+        } else if (pat === 3) {
+          // Ring弾 (Phase2+)
+          const n = b.phase===3?14:10;
+          for (let a=0;a<n;a++) this._fireEBullet(b.x, b.y, (a/n)*Math.PI*2+b.t*0.002, 140, b.ac);
+        } else if (pat === 4) {
+          // 3-way連射+螺旋弾 (Phase3)
+          for (let k=0;k<4;k++) this.time.delayedCall(k*110, ()=>{
+            if(!this.boss) return;
+            const ba = Math.atan2(this.player.y-this.boss.y, this.player.x-this.boss.x);
+            [-0.25,0,0.25].forEach(o=>this._fireEBullet(this.boss.x, this.boss.y+28, ba+o, 290, this.boss.mc));
+          });
+          for (let k=0;k<6;k++) this.time.delayedCall(k*70, ()=>{
+            if(!this.boss) return; b.spiralAngle += 0.55;
+            this._fireEBullet(this.boss.x, this.boss.y, b.spiralAngle, 165, 0x88ddff);
+            this._fireEBullet(this.boss.x, this.boss.y, b.spiralAngle+Math.PI, 165, 0x88ddff);
+          });
+        }
+        b.atkIdx++;
+        b.atkTimer = b.phase===3?950:b.phase===2?1400:2000;
+      }
+    }
+    // 接触判定
+    const immune = this.invincible || this.cloakOn;
+    if (!immune && b.phase > 0 && this.player.alive &&
+        this._hit(b.x, b.y, b.w*0.75, b.h*0.75, this.player.x, this.player.y, this.player.w*0.6, this.player.h*0.6))
+      this._hitPlayer();
+  }
+
+  // ── ORACLE (Wave 10) — 予測弾幕型 ──────────────────────
+  _updateBossOracle(b, s, dt) {
+    const hpPct = b.hp / b.maxHp;
+    // Phase遷移
+    if (hpPct < 0.65 && b.phase === 1) {
+      b.phase = 2;
+      this._floatText(W / 2, H / 2, '—  PREDICTION  —', '#cc66ff');
+      this._shake(18, 450);
+    }
+    if (hpPct < 0.30 && b.phase === 2) {
+      b.phase = 3;
+      this._floatText(W / 2, H / 2, '—  OMNISCIENCE  —', '#dd44ff');
+      this._shake(25, 600);
+      const bd = STORY_DATA.bosses[this.wave];
+      if (bd && bd.rageLine) this.comms.send(bd.name, bd.rageLine, 5);
+    }
+    // 状態初期化
+    if (b.spiralAngle == null) {
+      b.spiralAngle = 0; b.spiralTimer = 0; b.flowerAngle = 0;
+      b.prevPX = this.player.x; b.prevPY = this.player.y;
+      b.predTimer = 0; b.laserAccum = 0; b.laserAngle = 0;
+    }
+    // 移動: ORACLEはほぼ静止→ゆっくり→固定
+    if (b.phase === 1) { b.x = W/2 + Math.sin(b.t*0.0004)*8; b.y = b.targetY + Math.sin(b.t*0.0006)*5; }
+    else if (b.phase === 2) { b.x = W/2 + Math.sin(b.t*0.0008)*(W*0.18); b.y = b.targetY + Math.sin(b.t*0.0005)*8; }
+    else { b.x += (W/2 - b.x)*0.03; b.y += (b.targetY-15 - b.y)*0.03; }
+    // プレイヤー速度推定
+    const pvx = (this.player.x - b.prevPX) / Math.max(s, 0.001);
+    const pvy = (this.player.y - b.prevPY) / Math.max(s, 0.001);
+    b.prevPX = this.player.x; b.prevPY = this.player.y;
+    // メイン攻撃
     b.atkTimer -= dt;
     if (b.atkTimer <= 0) {
-      const pat = b.atkIdx % (b.phase === 2 ? 5 : 3);
+      const pat = b.atkIdx % (b.phase===1?3:b.phase===2?4:5);
       if (pat === 0) {
-        for (let a = 160; a <= 380; a += 28)
-          this._fireEBullet(b.x, b.y + 32, a * Math.PI / 180, 165, b.mc);
+        // 花弾（薔薇曲線）
+        const petals = b.phase===1?3:5;
+        const steps = b.phase>=3?40:28;
+        for (let i=0;i<steps;i++) {
+          const theta = (i/steps)*Math.PI*2 + b.flowerAngle;
+          const r = Math.abs(Math.cos(petals*theta))*180;
+          const spd = 75 + r*0.4;
+          this._fireEBullet(b.x+Math.cos(theta)*r*0.12, b.y+Math.sin(theta)*r*0.12, theta, spd, b.mc);
+        }
+        b.flowerAngle += 0.35;
       } else if (pat === 1) {
-        this._aimAtPlayer(b.x, b.y + 32, 230, b.mc);
-        this._aimAtPlayer(b.x - 32, b.y + 22, 205, b.mc);
-        this._aimAtPlayer(b.x + 32, b.y + 22, 205, b.mc);
+        // 扇状狙い撃ち
+        const ba = Math.atan2(this.player.y-b.y, this.player.x-b.x);
+        const n = b.phase>=2?5:3;
+        for (let i=-Math.floor(n/2);i<=Math.floor(n/2);i++) this._fireEBullet(b.x, b.y+32, ba+i*0.18, 185, b.mc);
       } else if (pat === 2) {
-        for (let a = 0; a < 360; a += 40)
-          this._fireEBullet(b.x, b.y, (a + b.t * 0.09) * Math.PI / 180, 135, b.mc);
+        // 全方位Ring弾
+        const n = b.phase>=3?20:14;
+        for (let i=0;i<n;i++) {
+          this._fireEBullet(b.x, b.y, (i/n)*Math.PI*2+b.t*0.0001, 115, b.mc);
+          if (b.phase>=3) this._fireEBullet(b.x, b.y, (i/n)*Math.PI*2+Math.PI/n, 85, b.mc);
+        }
       } else if (pat === 3) {
-        for (let k = 0; k < 5; k++)
-          this.time.delayedCall(k * 100, () => { if (this.boss) this._aimAtPlayer(this.boss.x, this.boss.y + 32, 270, this.boss.mc); });
-      } else {
-        [-0.4, 0, 0.4].forEach(off => {
-          const ang = Math.atan2(this.player.y - b.y, this.player.x - b.x) + off;
-          this._fireEBullet(b.x, b.y + 32, ang, 240, b.mc);
+        // 偏差射撃（Phase2+）: 0.4秒先を予測
+        const predX = Math.max(20, Math.min(W-20, this.player.x + pvx*0.4));
+        const predY = Math.max(20, Math.min(H-20, this.player.y + pvy*0.4));
+        const ang = Math.atan2(predY-b.y, predX-b.x);
+        for (let k=0;k<4;k++) this.time.delayedCall(k*80, ()=>{
+          if(!this.boss) return;
+          this._fireEBullet(this.boss.x, this.boss.y+32, ang+(k-1.5)*0.06, 235, 0xddaaff);
+        });
+      } else if (pat === 4) {
+        // 設置+展開弾（Phase3）
+        [{x:W*0.2,y:H*0.35},{x:W*0.5,y:H*0.25},{x:W*0.8,y:H*0.35}].forEach(pos=>{
+          const a = Math.atan2(pos.y-b.y, pos.x-b.x);
+          const d = Math.sqrt((pos.x-b.x)**2+(pos.y-b.y)**2);
+          this._fireEBullet(b.x, b.y, a, d/2, 0xeeddff);
+        });
+        this.time.delayedCall(2000, ()=>{
+          if(!this.boss) return;
+          [{x:W*0.2,y:H*0.35},{x:W*0.5,y:H*0.25},{x:W*0.8,y:H*0.35}].forEach(pos=>{
+            for (let i=0;i<14;i++) this._fireEBullet(pos.x, pos.y, (i/14)*Math.PI*2, 125, this.boss.mc);
+          });
+          this._shake(8, 200);
         });
       }
       b.atkIdx++;
-      b.atkTimer = b.phase === 2 ? 1350 : 2000;
+      b.atkTimer = b.phase===1?2200:b.phase===2?1700:1300;
     }
+    // 螺旋弾（Phase2+）常時
+    if (b.phase >= 2) {
+      b.spiralTimer -= dt;
+      if (b.spiralTimer <= 0) {
+        for (let a=0;a<2;a++) this._fireEBullet(b.x, b.y, b.spiralAngle+(a*Math.PI), b.phase===3?130:105, b.mc);
+        b.spiralAngle += 0.12;
+        b.spiralTimer = b.phase===3?90:130;
+      }
+    }
+    // 偏差単発（Phase2+）独立タイマー
+    if (b.phase >= 2) {
+      b.predTimer -= dt;
+      if (b.predTimer <= 0) {
+        const px = Math.max(20, Math.min(W-20, this.player.x+pvx*0.4));
+        const py = Math.max(20, Math.min(H-20, this.player.y+pvy*0.4));
+        this._fireEBullet(b.x, b.y+32, Math.atan2(py-b.y, px-b.x), 215, 0xddaaff);
+        b.predTimer = b.phase===3?500:850;
+      }
+    }
+    // 擬似レーザー（Phase3）
+    if (b.phase === 3) {
+      b.laserAngle += 0.28 * s;
+      b.laserAccum += dt;
+      while (b.laserAccum >= 40) {
+        b.laserAccum -= 40;
+        for (let a=0;a<4;a++) this._fireEBullet(b.x, b.y, b.laserAngle+(a*Math.PI/2), 340, 0xffaaff);
+      }
+    }
+    // 接触判定
     const immune = this.invincible || this.cloakOn;
     if (!immune && b.phase > 0 && this.player.alive &&
-        this._hit(b.x, b.y, b.w * 0.75, b.h * 0.75, this.player.x, this.player.y, this.player.w * 0.6, this.player.h * 0.6))
+        this._hit(b.x, b.y, b.w*0.75, b.h*0.75, this.player.x, this.player.y, this.player.w*0.6, this.player.h*0.6))
+      this._hitPlayer();
+  }
+
+  // ── NEXUS CORE (Wave 15) — 最終ボス 4Phase ──────────────
+  _updateBossNexus(b, s, dt) {
+    const hpPct = b.hp / b.maxHp;
+    // Phase遷移
+    if (hpPct <= 0.70 && b.phase === 1) {
+      b.phase = 2; b.atkTimer = 800; b.atkIdx = 0;
+      this._floatText(W/2, H/2, '—  ORACLE PROTOCOL  —', '#aa44ff');
+      this._shake(18, 500);
+    }
+    if (hpPct <= 0.40 && b.phase === 2) {
+      b.phase = 3; b.atkTimer = 600; b.atkIdx = 0; b.targetY = H/2-80;
+      this._floatText(W/2, H/2, '—  CONVERGENCE  —', '#ff8800');
+      this._shake(24, 600);
+      const bd = STORY_DATA.bosses[this.wave];
+      if (bd && bd.rageLine) this.comms.send(bd.name, bd.rageLine, 5);
+    }
+    if (hpPct <= 0.15 && b.phase === 3) {
+      b.phase = 4; b.atkTimer = 400; b.atkIdx = 0;
+      this._floatText(W/2, H/2, '—  NEXUS PROTOCOL  —', '#ff1133');
+      this._shake(30, 800);
+    }
+    // 状態初期化
+    if (b.spiralAngle == null) {
+      b.spiralAngle = 0; b.laserAngle = 0;
+      b.splitBullets = []; b.moveTarget = {x:W/2, y:b.targetY};
+      b.moveTimer = 0; b.safeX = W/2; b.safeDriftDir = 1;
+    }
+    // 移動
+    if (b.phase <= 2) {
+      const spd = b.phase===2?1.8:1.2;
+      const tx = W/2 + Math.sin(b.t*0.001*spd)*(W*0.34);
+      b.x += (tx - b.x)*0.04;
+      b.y += (b.targetY - b.y)*0.02;
+    } else if (b.phase === 3) {
+      b.y += (b.targetY - b.y)*0.03;
+      const tx = W/2 + Math.sin(b.t*0.002)*(W*0.42);
+      b.x += (tx - b.x)*0.05;
+    } else {
+      b.moveTimer -= dt;
+      if (b.moveTimer <= 0) {
+        b.moveTarget.x = 60+Math.random()*(W-120);
+        b.moveTarget.y = 60+Math.random()*(H/2-60);
+        b.moveTimer = 800+Math.random()*1200;
+      }
+      b.x += (b.moveTarget.x - b.x)*0.06;
+      b.y += (b.moveTarget.y - b.y)*0.06;
+    }
+    // 分裂弾更新
+    for (let i=b.splitBullets.length-1;i>=0;i--) {
+      const sb = b.splitBullets[i]; sb.timer -= dt;
+      if (sb.timer <= 0) {
+        for (let a=0;a<4;a++) this._fireEBullet(sb.x, sb.y, sb.baseAngle+(a*Math.PI/2), 155, b.mc);
+        b.splitBullets.splice(i, 1);
+      } else { sb.x += sb.vx*s; sb.y += sb.vy*s; }
+    }
+    // 攻撃
+    b.atkTimer -= dt;
+    if (b.atkTimer <= 0) {
+      if (b.phase === 1) {
+        // GUARDIANコピー: 高速狙い撃ち+V字弾+扇状弾
+        const pat = b.atkIdx % 3;
+        if (pat === 0) {
+          for (let k=0;k<3;k++) this.time.delayedCall(k*120, ()=>{ if(this.boss) this._aimAtPlayer(this.boss.x, this.boss.y+32, 255, this.boss.mc); });
+        } else if (pat === 1) {
+          const ba = Math.atan2(this.player.y-b.y, this.player.x-b.x);
+          [-0.5,-0.25,0,0.25,0.5].forEach(off=>this._fireEBullet(b.x, b.y+32, ba+off, 215, b.mc));
+        } else {
+          for (let a=150;a<=390;a+=30) this._fireEBullet(b.x, b.y+32, a*Math.PI/180, 165, b.mc);
+        }
+        b.atkTimer = 1800;
+      } else if (b.phase === 2) {
+        // ORACLEコピー: 花弾+螺旋弾
+        const pat = b.atkIdx % 3;
+        if (pat === 0) {
+          for (let layer=0;layer<2;layer++) {
+            const off = layer*(Math.PI/12);
+            for (let i=0;i<12;i++) this._fireEBullet(b.x, b.y, (i/12)*Math.PI*2+off+b.t*0.0005, 115+layer*35, 0xaa44ff);
+          }
+        } else if (pat === 1) {
+          for (let k=0;k<8;k++) this.time.delayedCall(k*80, ()=>{
+            if(!this.boss) return;
+            this._fireEBullet(this.boss.x, this.boss.y, this.boss.spiralAngle, 145, 0xaa44ff);
+            this._fireEBullet(this.boss.x, this.boss.y, this.boss.spiralAngle+Math.PI, 145, 0xaa44ff);
+            this.boss.spiralAngle += 0.45;
+          });
+        } else {
+          for (let i=0;i<8;i++) this._fireEBullet(b.x, b.y, (i/8)*Math.PI*2, 100, 0xaa44ff);
+          for (let k=0;k<3;k++) this.time.delayedCall(k*150, ()=>{ if(this.boss) this._aimAtPlayer(this.boss.x, this.boss.y+32, 235, this.boss.mc); });
+        }
+        b.atkTimer = 1500;
+      } else if (b.phase === 3) {
+        // 混在: 十字レーザー+分裂弾+コピー技
+        const pat = b.atkIdx % 5;
+        if (pat === 0) {
+          // 十字レーザー風
+          for (let k=0;k<10;k++) this.time.delayedCall(k*60, ()=>{
+            if(!this.boss) return;
+            for (let a=0;a<4;a++) this._fireEBullet(this.boss.x, this.boss.y, this.boss.laserAngle+(a*Math.PI/2), 195, 0xff8800);
+            this.boss.laserAngle += 0.08;
+          });
+        } else if (pat === 1) {
+          // 分裂弾
+          for (let i=0;i<5;i++) {
+            const ang = Math.atan2(this.player.y-b.y, this.player.x-b.x)+(i-2)*0.3;
+            b.splitBullets.push({x:b.x,y:b.y+20,vx:Math.cos(ang)*125,vy:Math.sin(ang)*125,baseAngle:ang,timer:1000});
+            this._fireEBullet(b.x, b.y+20, ang, 125, 0xffaa00);
+          }
+        } else if (pat === 2) {
+          // 高速5連狙い撃ち
+          for (let k=0;k<5;k++) this.time.delayedCall(k*100, ()=>{ if(this.boss) this._aimAtPlayer(this.boss.x, this.boss.y+32, 280, this.boss.mc); });
+        } else if (pat === 3) {
+          // 3本腕螺旋弾
+          for (let k=0;k<10;k++) this.time.delayedCall(k*70, ()=>{
+            if(!this.boss) return;
+            for (let a=0;a<3;a++) this._fireEBullet(this.boss.x, this.boss.y, this.boss.spiralAngle+(a*Math.PI*2/3), 135, 0xaa44ff);
+            this.boss.spiralAngle += 0.35;
+          });
+        } else {
+          // V字+花弾同時
+          const ba = Math.atan2(this.player.y-b.y, this.player.x-b.x);
+          [-0.6,-0.3,0,0.3,0.6].forEach(off=>this._fireEBullet(b.x, b.y+32, ba+off, 225, b.mc));
+          for (let i=0;i<10;i++) this._fireEBullet(b.x, b.y, (i/10)*Math.PI*2+b.t*0.001, 105, 0xaa44ff);
+        }
+        b.atkTimer = 1200;
+      } else {
+        // Phase4: 全力+NEXUS Protocol
+        const pat = b.atkIdx % 6;
+        if (pat === 0 || pat === 3) {
+          // NEXUS Protocol: 壁弾幕（安全地帯あり）
+          const gap = 70;
+          b.safeX += b.safeDriftDir*(30+Math.random()*40);
+          if (b.safeX < gap+20) b.safeDriftDir = 1;
+          if (b.safeX > W-gap-20) b.safeDriftDir = -1;
+          for (let x=0;x<=W;x+=18) {
+            if (Math.abs(x-b.safeX) < gap/2) continue;
+            this._fireEBullet(x, -10, Math.PI/2, 130, 0xff1133);
+          }
+          this.time.delayedCall(400, ()=>{
+            if(!this.boss) return;
+            const sy = 200+Math.random()*300;
+            for (let y=30;y<=H-30;y+=22) { if(Math.abs(y-sy)<40) continue; this._fireEBullet(-10,y,0,115,0xff1133); }
+          });
+        } else if (pat === 1) {
+          // 高速十字レーザー
+          for (let k=0;k<14;k++) this.time.delayedCall(k*45, ()=>{
+            if(!this.boss) return;
+            for (let a=0;a<4;a++) this._fireEBullet(this.boss.x, this.boss.y, this.boss.laserAngle+(a*Math.PI/2), 235, 0xff8800);
+            this.boss.laserAngle += 0.12;
+          });
+        } else if (pat === 2) {
+          // 高速分裂弾
+          for (let i=0;i<6;i++) {
+            const ang = (i/6)*Math.PI*2;
+            b.splitBullets.push({x:b.x,y:b.y,vx:Math.cos(ang)*145,vy:Math.sin(ang)*145,baseAngle:ang,timer:700});
+            this._fireEBullet(b.x, b.y, ang, 145, 0xffaa00);
+          }
+        } else if (pat === 4) {
+          // 螺旋+狙い撃ち同時
+          for (let k=0;k<10;k++) this.time.delayedCall(k*55, ()=>{
+            if(!this.boss) return;
+            for (let a=0;a<4;a++) this._fireEBullet(this.boss.x, this.boss.y, this.boss.spiralAngle+(a*Math.PI/2), 165, 0xaa44ff);
+            this.boss.spiralAngle += 0.4;
+          });
+          for (let k=0;k<4;k++) this.time.delayedCall(k*80, ()=>{ if(this.boss) this._aimAtPlayer(this.boss.x, this.boss.y+32, 300, this.boss.mc); });
+        } else {
+          // 花弾+V字の集大成
+          for (let layer=0;layer<3;layer++) {
+            for (let i=0;i<10;i++) this._fireEBullet(b.x, b.y, (i/10)*Math.PI*2+layer*(Math.PI/10), 95+layer*30, 0xaa44ff);
+          }
+          const ba = Math.atan2(this.player.y-b.y, this.player.x-b.x);
+          [-0.4,-0.2,0,0.2,0.4].forEach(off=>this._fireEBullet(b.x, b.y+32, ba+off, 255, b.mc));
+        }
+        b.atkTimer = 1000;
+      }
+      b.atkIdx++;
+    }
+    // 接触判定
+    const immune = this.invincible || this.cloakOn;
+    if (!immune && b.phase > 0 && this.player.alive &&
+        this._hit(b.x, b.y, b.w*0.75, b.h*0.75, this.player.x, this.player.y, this.player.w*0.6, this.player.h*0.6))
+      this._hitPlayer();
+  }
+
+  // ── Default boss (fallback) ─────────────────────────────
+  _updateBossDefault(b, s, dt) {
+    if (b.hp < b.maxHp*0.38 && b.phase === 1) {
+      b.phase = 2; this._floatText(W/2, H/2, '—  ENRAGED  —', '#ff2244'); this._shake(20, 500);
+    }
+    const spd = b.phase === 2 ? 2.2 : 1.4;
+    b.x = W/2 + Math.sin(b.t*0.001*spd)*(W*0.34);
+    b.atkTimer -= dt;
+    if (b.atkTimer <= 0) {
+      const pat = b.atkIdx % (b.phase===2?5:3);
+      if (pat===0) { for(let a=160;a<=380;a+=28) this._fireEBullet(b.x,b.y+32,a*Math.PI/180,165,b.mc); }
+      else if (pat===1) { this._aimAtPlayer(b.x,b.y+32,230,b.mc); this._aimAtPlayer(b.x-32,b.y+22,205,b.mc); this._aimAtPlayer(b.x+32,b.y+22,205,b.mc); }
+      else if (pat===2) { for(let a=0;a<360;a+=40) this._fireEBullet(b.x,b.y,(a+b.t*0.09)*Math.PI/180,135,b.mc); }
+      else if (pat===3) { for(let k=0;k<5;k++) this.time.delayedCall(k*100,()=>{if(this.boss)this._aimAtPlayer(this.boss.x,this.boss.y+32,270,this.boss.mc);}); }
+      else { [-0.4,0,0.4].forEach(off=>{this._fireEBullet(b.x,b.y+32,Math.atan2(this.player.y-b.y,this.player.x-b.x)+off,240,b.mc);}); }
+      b.atkIdx++; b.atkTimer = b.phase===2?1350:2000;
+    }
+    const immune = this.invincible || this.cloakOn;
+    if (!immune && b.phase>0 && this.player.alive &&
+        this._hit(b.x,b.y,b.w*0.75,b.h*0.75,this.player.x,this.player.y,this.player.w*0.6,this.player.h*0.6))
       this._hitPlayer();
   }
 
@@ -1713,6 +2130,7 @@ class GameScene extends Phaser.Scene {
     this._drawEnemyBullets(g, now);
     this._drawEnemies(g, now);
     this._drawBoss(g, now);
+    this._drawBossExtras(g, now);
     this._drawPlayer(g, now);
     this._drawPowerups(g, now);
 
@@ -1756,6 +2174,10 @@ class GameScene extends Phaser.Scene {
       hud.fillStyle(this.boss.mc, 1); hud.fillRect(bx, by, bw * pct, 8);
       hud.fillStyle(0xffffff, 0.28 * (0.4 + 0.4 * Math.sin(now * 0.008)));
       hud.fillRect(bx, by, bw * pct, 4);
+      // Phase区切り線
+      const marks = this.wave===5?[0.6,0.3]:this.wave===10?[0.65,0.3]:this.wave===15?[0.7,0.4,0.15]:[];
+      hud.lineStyle(1, 0xffffff, 0.4);
+      marks.forEach(m => hud.lineBetween(bx+bw*m, by-2, bx+bw*m, by+10));
     }
   }
 
@@ -1877,6 +2299,30 @@ class GameScene extends Phaser.Scene {
     g.strokeTriangle(b.x, b.y - 52, b.x - 52, b.y + 2, b.x + 52, b.y + 2);
     if (rage) {
       g.lineStyle(1.5, ac, pulse * 0.7); g.strokeCircle(b.x, b.y, 65 + pulse * 8);
+    }
+  }
+
+  // ── Boss extras: mines (GUARDIAN), split bullet markers (NEXUS) ──
+  _drawBossExtras(g, now) {
+    const b = this.boss;
+    if (!b) return;
+    // GUARDIAN設置弾（脈動する警告円）
+    if (b.mines) {
+      for (const m of b.mines) {
+        const p = 0.5 + 0.5 * Math.sin(now * 0.012);
+        g.fillStyle(0x66ccff, 0.15 * p); g.fillCircle(m.x, m.y, 22);
+        g.lineStyle(2, 0x66ccff, 0.6 + p * 0.4); g.strokeCircle(m.x, m.y, 14 + p * 6);
+        g.fillStyle(0x66ccff, 0.7); g.fillCircle(m.x, m.y, 4);
+      }
+    }
+    // NEXUS分裂弾マーカー（カウントダウン風）
+    if (b.splitBullets) {
+      for (const sb of b.splitBullets) {
+        const p = 0.5 + 0.5 * Math.sin(now * 0.015);
+        g.fillStyle(0xffaa00, 0.2 * p); g.fillCircle(sb.x, sb.y, 16);
+        g.lineStyle(1.5, 0xffaa00, 0.6 + p * 0.3); g.strokeCircle(sb.x, sb.y, 10);
+        g.fillStyle(0xffaa00, 0.8); g.fillCircle(sb.x, sb.y, 3);
+      }
     }
   }
 
