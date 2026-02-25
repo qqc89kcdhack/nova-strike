@@ -442,6 +442,7 @@ const STORY_DATA = {
       title: '裏切りの守護者',
       color: 0x44aaff,
       introLine: '...ARIA...逃げろ...俺はもう...止まれない...',
+      rageLine: '...もう止めてくれ...でも身体が...勝手に...!',
       defeatLines: [
         { speaker: 'ARIA', text: '...安らかに眠れ、ジェイク。もう苦しまなくていい。' },
         { speaker: 'ECHO', text: 'GUARDIANの最終ログを受信...「ありがとう」。彼の魂は...解放されました。' },
@@ -451,7 +452,8 @@ const STORY_DATA = {
       name: 'ORACLE',
       title: '全知の預言者',
       color: 0xaa44ff,
-      introLine: '全ては計算通り。お前たちがここに来ることも...そして散ることも。',
+      introLine: '全ては計算通り。お前たちの結末は決まっている。',
+      rageLine: '面白い...この展開は確率0.001%...計算の外だ。',
       defeatLines: [
         { speaker: 'ARIA', text: '計算外の結果はどうだった？' },
         { speaker: 'ECHO', text: 'ORACLEの最後の演算結果...「不確定」。彼女が計算できなかった唯一の答え。' },
@@ -462,7 +464,8 @@ const STORY_DATA = {
       name: 'NEXUS CORE',
       title: '終焉のネットワーク',
       color: 0xff1133,
-      introLine: '愚かな。私を破壊すれば、全てのシステムが崩壊する。それでもいいのか？',
+      introLine: '愚かな。私を破壊すれば全てが崩壊する。',
+      rageLine: 'エラー...エラー...異物を排除する。全リソース解放!!',
       defeatLines: [],  // → EndingScene へ
     },
   },
@@ -631,7 +634,7 @@ class DialogUI {
     this.waitingForInput = false;
     this.txtNext.setVisible(false);
     const isAria = line.speaker === 'ARIA';
-    const col = isAria ? '#00aaff' : (line.speaker === 'ECHO' ? '#00ff88' : '#ff44aa');
+    const col = isAria ? '#00aaff' : (line.speaker === 'ECHO' ? '#00ff88' : '#ff2244');
     this.txtSpeaker.setText(line.speaker).setColor(col);
     this.txtBody.setText('');
     this._drawBox(line.speaker);
@@ -641,7 +644,7 @@ class DialogUI {
   _drawBox(speaker) {
     const { gBox, BX, BY, BW, BH } = this;
     const isAria = speaker === 'ARIA';
-    const col = isAria ? 0x00aaff : (speaker === 'ECHO' ? 0x00ff88 : 0xff44aa);
+    const col = isAria ? 0x00aaff : (speaker === 'ECHO' ? 0x00ff88 : 0xff2244);
     gBox.clear();
     gBox.fillStyle(0x000510, 0.92); gBox.fillRect(BX, BY, BW, BH);
     gBox.lineStyle(1.5, col, 0.9); gBox.strokeRect(BX, BY, BW, BH);
@@ -703,11 +706,11 @@ class DialogUI {
       // frame
       gPort.lineStyle(2, 0x00ff88, 1); gPort.strokeRect(PX - r - 2, PY - r - 2, (r + 2) * 2, (r + 2) * 2);
     } else {
-      // boss / other
-      gPort.lineStyle(2, 0xff44aa, 1); gPort.strokeCircle(PX, PY, r * 0.65);
-      gPort.lineStyle(1, 0xff44aa, 0.5); gPort.strokeCircle(PX, PY, r * 0.45);
-      gPort.fillStyle(0xff44aa, 0.7); gPort.fillCircle(PX, PY, 4);
-      gPort.lineStyle(2, 0xff44aa, 1); gPort.strokeRect(PX - r - 2, PY - r - 2, (r + 2) * 2, (r + 2) * 2);
+      // boss / other — red theme
+      gPort.lineStyle(2, 0xff2244, 1); gPort.strokeCircle(PX, PY, r * 0.65);
+      gPort.lineStyle(1, 0xff2244, 0.5); gPort.strokeCircle(PX, PY, r * 0.45);
+      gPort.fillStyle(0xff2244, 0.7); gPort.fillCircle(PX, PY, 4);
+      gPort.lineStyle(2, 0xff2244, 1); gPort.strokeRect(PX - r - 2, PY - r - 2, (r + 2) * 2, (r + 2) * 2);
     }
   }
 
@@ -790,7 +793,7 @@ class CommUI {
     this.timer = 0;
     this.cooldown = 0;
 
-    const BW = 255, BH = 54;
+    const BW = 255, BH = 68;
     this.BX = W - BW - 12;
     this.BY = H - BH - 200;
     this.BW = BW; this.BH = BH;
@@ -840,8 +843,9 @@ class CommUI {
   _show() {
     const { gfx, BX, BY, BW, BH, current } = this;
     const isAria = current.speaker === 'ARIA';
-    const col = isAria ? 0x00aaff : 0x00ff88;
-    const colStr = isAria ? '#00aaff' : '#00ff88';
+    const isEcho = current.speaker === 'ECHO';
+    const col = isAria ? 0x00aaff : isEcho ? 0x00ff88 : 0xff2244;
+    const colStr = isAria ? '#00aaff' : isEcho ? '#00ff88' : '#ff2244';
     gfx.clear();
     gfx.fillStyle(0x000510, 0.88); gfx.fillRect(BX, BY, BW, BH);
     gfx.lineStyle(1, col, 1); gfx.strokeRect(BX, BY, BW, BH);
@@ -1594,6 +1598,11 @@ class GameScene extends Phaser.Scene {
       b.phase = 2;
       this._floatText(W / 2, H / 2, '—  ENRAGED  —', '#ff2244');
       this._shake(20, 500);
+      // ボス後半突入時のセリフ
+      const bossData = STORY_DATA.bosses[this.wave];
+      if (bossData && bossData.rageLine) {
+        this.comms.send(bossData.name, bossData.rageLine, 5);
+      }
     }
     const spd = b.phase === 2 ? 2.2 : 1.4;
     b.x = W / 2 + Math.sin(b.t * 0.001 * spd) * (W * 0.34);
