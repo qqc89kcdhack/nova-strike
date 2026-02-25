@@ -1530,21 +1530,25 @@ class GameScene extends Phaser.Scene {
     const now = Date.now();
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
+      const EL = e.w, ER = W - e.w;  // same margin as player
       if (e.type === 'scout') {
         e.x += e.vx + Math.sin(now * 0.0028 + e.ph) * 0.85;
         e.y += e.vy;
-        if (e.x < 18 || e.x > W - 18) e.vx *= -1;
+        if (e.x < EL || e.x > ER) e.vx *= -1;
+        e.x = Phaser.Math.Clamp(e.x, EL, ER);
       } else if (e.type === 'fighter') {
         e.x += e.vx * s;
         e.y += e.vy * s + Math.sin(now * e.sineSpd + e.ph) * 0.9;
         e.dist += Math.abs(e.vx * s);
-        if (e.x < -65 || e.x > W + 65) { this.enemies.splice(i, 1); continue; }
+        if (e.x <= EL) { e.vx = Math.abs(e.vx); e.x = EL; }
+        if (e.x >= ER) { e.vx = -Math.abs(e.vx); e.x = ER; }
       } else if (e.type === 'bomber') {
         e.x += e.vx; e.y += e.vy;
         e.vx += Math.sin(now * 0.0018 + e.ph) * 0.04;
         e.vx = Phaser.Math.Clamp(e.vx, -1.1, 1.1);
-        if (e.x < 28) e.vx = Math.abs(e.vx);
-        if (e.x > W - 28) e.vx = -Math.abs(e.vx);
+        if (e.x < EL) e.vx = Math.abs(e.vx);
+        if (e.x > ER) e.vx = -Math.abs(e.vx);
+        e.x = Phaser.Math.Clamp(e.x, EL, ER);
       }
       if (e.y > H + 60) { this.enemies.splice(i, 1); continue; }
       e.shootMs -= dt;
