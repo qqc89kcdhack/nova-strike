@@ -540,27 +540,34 @@ class DialogUI {
     this.waitingForInput = false;
     this.onDone = null;
 
-    const BX = 28, BY = H - 180, BW = W - 56, BH = 155;
+    const BX = 20, BY = H - 190, BW = W - 40, BH = 168;
     this.BX = BX; this.BY = BY; this.BW = BW; this.BH = BH;
     const PX = BX + 36, PY = BY + BH / 2;
-    const TX = BX + 82, TY = BY + 10;
+    const TX = BX + 78, TY = BY + 10;
+    const bodyW = BW - 78 - 14;   // text area width
 
     this.gBox  = scene.add.graphics().setDepth(55).setVisible(false);
     this.gPort = scene.add.graphics().setDepth(56).setVisible(false);
 
+    // Clip mask: prevent any text from rendering outside the box
+    const mask = scene.make.graphics({ x: 0, y: 0, add: false });
+    mask.fillRect(BX, BY, BW, BH);
+    this.clipMask = mask.createGeometryMask();
+
     this.txtSpeaker = scene.add.text(TX, TY, '', {
       fontFamily: 'Orbitron, monospace', fontSize: '11px', color: '#00aaff',
       stroke: '#001133', strokeThickness: 2,
-    }).setDepth(57).setVisible(false);
+    }).setDepth(57).setVisible(false).setMask(this.clipMask);
 
     this.txtBody = scene.add.text(TX, TY + 22, '', {
-      fontFamily: 'Orbitron, monospace', fontSize: '12px', color: '#ddeeff',
-      wordWrap: { width: BW - 100 }, lineSpacing: 4, maxLines: 5,
-    }).setDepth(57).setVisible(false);
+      fontFamily: 'monospace', fontSize: '12px', color: '#ddeeff',
+      wordWrap: { width: bodyW }, lineSpacing: 4,
+    }).setDepth(57).setVisible(false).setMask(this.clipMask);
 
-    this.txtNext = scene.add.text(BX + BW - 8, BY + BH - 14, '▼ SPACE', {
-      fontFamily: 'Orbitron, monospace', fontSize: '10px', color: '#ffee00',
-    }).setOrigin(1, 0).setDepth(57).setVisible(false);
+    const nextTxt = IS_MOBILE ? '▼ TAP' : '▼ SPACE';
+    this.txtNext = scene.add.text(BX + BW - 8, BY + BH - 16, nextTxt, {
+      fontFamily: 'Orbitron, monospace', fontSize: '9px', color: '#ffee00',
+    }).setOrigin(1, 0).setDepth(58).setVisible(false);
 
     this.PX = PX; this.PY = PY;
   }
@@ -610,9 +617,9 @@ class DialogUI {
     gBox.lineBetween(BX, BY + BH - cl, BX, BY + BH); gBox.lineBetween(BX, BY + BH, BX + cl, BY + BH);
     gBox.lineBetween(BX + BW - cl, BY + BH, BX + BW, BY + BH); gBox.lineBetween(BX + BW, BY + BH, BX + BW, BY + BH - cl);
     // portrait divider
-    gBox.lineStyle(1, col, 0.35); gBox.lineBetween(BX + 75, BY + 5, BX + 75, BY + BH - 5);
+    gBox.lineStyle(1, col, 0.35); gBox.lineBetween(BX + 71, BY + 5, BX + 71, BY + BH - 5);
     // speaker underline
-    gBox.lineStyle(1, col, 0.4); gBox.lineBetween(BX + 82, BY + 24, BX + BW - 10, BY + 24);
+    gBox.lineStyle(1, col, 0.4); gBox.lineBetween(BX + 78, BY + 24, BX + BW - 10, BY + 24);
   }
 
   _drawPortrait(speaker) {
@@ -732,6 +739,7 @@ class DialogUI {
   destroy() {
     this.gBox.destroy(); this.gPort.destroy();
     this.txtSpeaker.destroy(); this.txtBody.destroy(); this.txtNext.destroy();
+    if (this.clipMask) this.clipMask.destroy();
   }
 }
 
