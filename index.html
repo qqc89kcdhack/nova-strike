@@ -1128,7 +1128,7 @@ class GameScene extends Phaser.Scene {
   _spawnBoss(wave) {
     this.bossMode = true;
     const bossData = STORY_DATA.bosses[wave];
-    const hp = 120 + wave * 30;
+    const hp = 300 + wave * 60;
     const col  = bossData ? bossData.color : 0xff1133;
     const name = bossData ? bossData.name  : 'BOSS';
 
@@ -1517,7 +1517,8 @@ class GameScene extends Phaser.Scene {
         }
       }
       if (hit) continue;
-      if (this.boss && this._hit(b.x, b.y, b.w, b.h, this.boss.x, this.boss.y, this.boss.w * 0.88, this.boss.h * 0.88)) {
+      if (this.boss && this.boss.phase > 0 &&
+          this._hit(b.x, b.y, b.w, b.h, this.boss.x, this.boss.y, this.boss.w * 0.88, this.boss.h * 0.88)) {
         this.boss.hp--; this._hitSpark(b.x, b.y, C.YELLOW);
         this.pBullets.splice(i, 1);
         if (this.boss.hp <= 0) this._killBoss();
@@ -1617,7 +1618,7 @@ class GameScene extends Phaser.Scene {
       b.atkTimer = b.phase === 2 ? 1350 : 2000;
     }
     const immune = this.invincible || this.cloakOn;
-    if (!immune && this.player.alive &&
+    if (!immune && b.phase > 0 && this.player.alive &&
         this._hit(b.x, b.y, b.w * 0.75, b.h * 0.75, this.player.x, this.player.y, this.player.w * 0.6, this.player.h * 0.6))
       this._hitPlayer();
   }
