@@ -84,6 +84,12 @@ body::after {
   background: radial-gradient(circle, rgba(255,238,0,0.12), transparent 70%);
 }
 .ctrl-btn.bomb.active { background: radial-gradient(circle, rgba(255,238,0,0.4), rgba(255,238,0,0.1) 70%); }
+.ctrl-btn.cloak {
+  width: 52px; height: 52px; font-size: 9px;
+  color: #aa66ff; border-color: rgba(170,102,255,0.4);
+  background: radial-gradient(circle, rgba(136,68,255,0.12), transparent 70%);
+}
+.ctrl-btn.cloak.active { background: radial-gradient(circle, rgba(136,68,255,0.5), rgba(136,68,255,0.1) 70%); }
 </style>
 </head>
 <body>
@@ -93,6 +99,7 @@ body::after {
   <div class="ctrl-row">
     <div id="joy-zone"><div id="joy-base"><div id="joy-knob"></div></div></div>
     <div class="ctrl-buttons">
+      <div class="ctrl-btn cloak" id="btn-cloak">CLK</div>
       <div class="ctrl-btn bomb" id="btn-bomb">BOMB</div>
       <div class="ctrl-btn fire" id="btn-fire">FIRE</div>
     </div>
@@ -107,7 +114,7 @@ const W = 480, H = 720;
 const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || ('ontouchstart' in window);
 
 // ── Global touch input state (HTML controls → Phaser) ──────────
-const TOUCH_INPUT = { dx: 0, dy: 0, fire: false, bomb: false, _bombPrev: false, bombJust: false };
+const TOUCH_INPUT = { dx: 0, dy: 0, fire: false, bomb: false, _bombPrev: false, bombJust: false, cloak: false };
 
 if (IS_MOBILE) {
   document.addEventListener('DOMContentLoaded', () => {
@@ -197,6 +204,18 @@ if (IS_MOBILE) {
     });
     btnBomb.addEventListener('touchcancel', () => {
       TOUCH_INPUT.bomb = false; btnBomb.classList.remove('active');
+    });
+
+    // ── Cloak button ──
+    const btnCloak = document.getElementById('btn-cloak');
+    btnCloak.addEventListener('touchstart', (e) => {
+      e.preventDefault(); TOUCH_INPUT.cloak = true; btnCloak.classList.add('active');
+    }, { passive: false });
+    btnCloak.addEventListener('touchend', () => {
+      TOUCH_INPUT.cloak = false; btnCloak.classList.remove('active');
+    });
+    btnCloak.addEventListener('touchcancel', () => {
+      TOUCH_INPUT.cloak = false; btnCloak.classList.remove('active');
     });
   });
 }
@@ -890,8 +909,8 @@ class TitleScene extends Phaser.Scene {
     this.tweens.add({ targets: pr, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
 
     const controls = IS_MOBILE
-      ? ['STICK  MOVE', 'FIRE / BOMB  BUTTONS']
-      : ['WASD / ↑↓←→  MOVE', 'SPACE  SHOOT    Z  BOMB'];
+      ? ['STICK  MOVE', 'FIRE / BOMB / CLK  BUTTONS']
+      : ['WASD / ↑↓←→  MOVE', 'SPACE SHOOT  Z BOMB  X CLOAK'];
     controls.forEach((txt, i) =>
       this.add.text(W / 2, H * 0.82 + i * 22, txt, {
         fontFamily: 'Orbitron, monospace', fontSize: '11px', color: '#223344',
@@ -940,6 +959,11 @@ class GameScene extends Phaser.Scene {
     this.wepExp      = 0;
     this.shieldOn    = false;
     this.shieldMs    = 0;
+    this.cloakGauge  = 100;   // Invisible gauge (0-100)
+    this.cloakMax    = 100;
+    this.cloakOn     = false;  // Currently cloaked?
+    this.cloakDrain  = 38;     // gauge drain per second while active
+    this.cloakRegen  = 0;      // passive regen (none - only from kills)
     this.bossMode    = false;
     this.over        = false;
     this.invincible  = false;
@@ -986,6 +1010,7 @@ class GameScene extends Phaser.Scene {
     this.txtBombs  = this.add.text(W-12, 30, '◈ ◈ ◈', ts('11px', '#ff7700')).setOrigin(1, 0).setDepth(25);
     this.txtWepLv  = this.add.text(12, 30, 'LV.1', ts('11px', '#ff7700')).setDepth(25);
     this.txtCombo  = this.add.text(W/2, H-55, '', ts('16px', '#00ff99')).setOrigin(0.5).setDepth(25);
+    this.txtCloak  = this.add.text(12, 42, 'CLOAK', ts('8px', '#8844ff')).setDepth(25);
 
     this.bossWarn = this.add.text(W/2, H/2 - 40, '⚠  BOSS INCOMING  ⚠', {
       ...ts('22px', '#ff2244'), stroke: '#ff0000', strokeThickness: 2,
@@ -996,7 +1021,7 @@ class GameScene extends Phaser.Scene {
 
     // ── Input ────────────────────────────────────────────────────
     this.cursors = this.input.keyboard.createCursorKeys();
-    this.keys    = this.input.keyboard.addKeys('W,A,S,D,SPACE,Z');
+    this.keys    = this.input.keyboard.addKeys('W,A,S,D,SPACE,Z,X');
     // Mobile: tap canvas to advance dialog
     if (IS_MOBILE) {
       this.input.on('pointerdown', () => {
@@ -1073,7 +1098,7 @@ class GameScene extends Phaser.Scene {
         vx: Phaser.Math.FloatBetween(-1.2, 1.2) * diff * 0.4,
         vy: (1.4 + Math.random() * 0.6) * diff * 0.35,
         hp: 1, maxHp: 1, w: 20, h: 20,
-        shootMs: Phaser.Math.Between(800, 2500), shootRate: 2400 / diff,
+        shootMs: Phaser.Math.Between(1000, 3000), shootRate: 3200 / diff,
         ph: Math.random() * Math.PI * 2, score: 100, col: C.CYAN,
         drop: Math.random() < 0.12,
       });
@@ -1083,7 +1108,7 @@ class GameScene extends Phaser.Scene {
         type, x: side < 0 ? -35 : W + 35, y: Phaser.Math.Between(70, H * 0.45),
         vx: side * -(2.2 + diff * 0.25), vy: 0.4,
         hp: 3, maxHp: 3, w: 28, h: 20,
-        shootMs: 600, shootRate: 1600 / diff,
+        shootMs: 800, shootRate: 2200 / diff,
         ph: Math.random() * Math.PI * 2, sineAmp: 55 + Math.random() * 35,
         sineSpd: 0.0018 + Math.random() * 0.0015,
         score: 250, col: C.MAGENTA, drop: Math.random() < 0.18, dist: 0,
@@ -1093,7 +1118,7 @@ class GameScene extends Phaser.Scene {
         type, x, y: -45,
         vx: Phaser.Math.FloatBetween(-0.4, 0.4), vy: 0.55 * diff * 0.45,
         hp: 10, maxHp: 10, w: 42, h: 42,
-        shootMs: 900, shootRate: 1100,
+        shootMs: 1100, shootRate: 1500,
         ph: Math.random() * Math.PI * 2, score: 600, col: C.ORANGE,
         drop: Math.random() < 0.65,
       });
@@ -1277,6 +1302,7 @@ class GameScene extends Phaser.Scene {
     this._shake(e.type === 'bomber' ? 10 : 4, 200);
     SFX.explode(e.type === 'bomber' ? 2 : 1);
     if (e.drop || Math.random() < 0.12) this._dropPowerup(e.x, e.y);
+    this.cloakGauge = Math.min(this.cloakGauge + (e.type === 'bomber' ? 12 : e.type === 'fighter' ? 6 : 3), this.cloakMax);
     this.wepExp = Math.min(this.wepExp + 6, 100);
     if (this.wepExp >= 100 && this.wepLv < 3) {
       this.wepLv++; this.wepExp = 0;
@@ -1308,6 +1334,7 @@ class GameScene extends Phaser.Scene {
     const wave = this.wave;
     this.boss = null;
     this.bossMode = false;
+    this.cloakGauge = this.cloakMax;  // Full recharge on boss kill
     this.waveCleared = true;  // _updateWaveProgressによる二重遷移を防止
     this.txtBossName.setAlpha(0);
 
@@ -1458,6 +1485,19 @@ class GameScene extends Phaser.Scene {
     }
     if (Phaser.Input.Keyboard.JustDown(K.Z) || T.bombJust) this._useBomb();
 
+    // Invisible cloak
+    const cloakHeld = K.X.isDown || T.cloak;
+    if (cloakHeld && this.cloakGauge > 0 && !this.cloakOn) {
+      this.cloakOn = true;
+    }
+    if (this.cloakOn) {
+      this.cloakGauge -= this.cloakDrain * (dt / 1000);
+      if (this.cloakGauge <= 0 || !cloakHeld) {
+        this.cloakGauge = Math.max(0, this.cloakGauge);
+        this.cloakOn = false;
+      }
+    }
+
     if (this.invincible) { this.invMs -= dt; if (this.invMs <= 0) this.invincible = false; }
   }
 
@@ -1515,7 +1555,8 @@ class GameScene extends Phaser.Scene {
         }
         e.shootMs = e.shootRate;
       }
-      if (!this.invincible && this.player.alive &&
+      const immune = this.invincible || this.cloakOn;
+      if (!immune && this.player.alive &&
           this._hit(e.x, e.y, e.w * 0.7, e.h * 0.7, this.player.x, this.player.y, this.player.w * 0.65, this.player.h * 0.65)) {
         this._explode(e.x, e.y, 1.5); this.enemies.splice(i, 1);
         this._hitPlayer();
@@ -1528,7 +1569,8 @@ class GameScene extends Phaser.Scene {
       const b = this.eBullets[i];
       b.x += b.vx * s; b.y += b.vy * s;
       if (b.y > H + 25 || b.y < -25 || b.x < -25 || b.x > W + 25) { this.eBullets.splice(i, 1); continue; }
-      if (!this.invincible && this.player.alive &&
+      const immune = this.invincible || this.cloakOn;
+      if (!immune && this.player.alive &&
           this._hit(b.x, b.y, b.w, b.h, this.player.x, this.player.y, this.player.w * 0.55, this.player.h * 0.55)) {
         this.eBullets.splice(i, 1);
         this._hitPlayer();
@@ -1572,9 +1614,10 @@ class GameScene extends Phaser.Scene {
         });
       }
       b.atkIdx++;
-      b.atkTimer = b.phase === 2 ? 1050 : 1650;
+      b.atkTimer = b.phase === 2 ? 1350 : 2000;
     }
-    if (!this.invincible && this.player.alive &&
+    const immune = this.invincible || this.cloakOn;
+    if (!immune && this.player.alive &&
         this._hit(b.x, b.y, b.w * 0.75, b.h * 0.75, this.player.x, this.player.y, this.player.w * 0.6, this.player.h * 0.6))
       this._hitPlayer();
   }
@@ -1681,6 +1724,11 @@ class GameScene extends Phaser.Scene {
     hud.lineStyle(1, C.CYAN, 0.18); hud.lineBetween(0, 56, W, 56);
     hud.fillStyle(0x001122, 0.9); hud.fillRect(10, 47, 82, 5);
     hud.fillStyle(C.ORANGE, 0.9); hud.fillRect(10, 47, 82 * (this.wepExp / 100), 5);
+    // Cloak gauge
+    const cPct = this.cloakGauge / this.cloakMax;
+    const cCol = this.cloakOn ? 0xaa66ff : 0x6633cc;
+    hud.fillStyle(0x110022, 0.9); hud.fillRect(46, 43, 48, 4);
+    hud.fillStyle(cCol, this.cloakOn ? 0.95 : 0.7); hud.fillRect(46, 43, 48 * cPct, 4);
     if (this.shieldOn) {
       hud.fillStyle(0x002233, 0.8); hud.fillRect(10, H - 16, 100, 5);
       hud.fillStyle(C.CYAN, 0.9);   hud.fillRect(10, H - 16, 100 * (this.shieldMs / 5500), 5);
@@ -1704,20 +1752,29 @@ class GameScene extends Phaser.Scene {
     const tilt = p.tilt;
     const tx = p.x, ty = p.y;
     const leanX = tilt * 6;
-    g.fillStyle(C.CYAN, 0.12 * thr); g.fillEllipse(tx, ty + 22, 28, 38 * thr);
-    g.fillStyle(C.CYAN, 1);
+    const cloaked = this.cloakOn;
+    const mainCol = cloaked ? 0x8844ff : C.CYAN;
+    const mainA   = cloaked ? 0.3 : 1;
+    const subA    = cloaked ? 0.2 : 0.82;
+    g.fillStyle(mainCol, 0.12 * thr * (cloaked ? 0.4 : 1)); g.fillEllipse(tx, ty + 22, 28, 38 * thr);
+    g.fillStyle(mainCol, mainA);
     g.fillTriangle(tx + leanX, ty - 16, tx - 13, ty + 13, tx + 13, ty + 13);
-    g.fillStyle(C.CYAN, 0.82);
+    g.fillStyle(mainCol, subA);
     g.fillTriangle(tx - 13 + leanX * 0.5, ty + 2, tx - 28, ty + 16, tx - 7, ty + 13);
     g.fillTriangle(tx + 13 + leanX * 0.5, ty + 2, tx + 28, ty + 16, tx + 7, ty + 13);
-    g.fillStyle(0x003344, 1); g.fillEllipse(tx + leanX * 0.6, ty - 3, 9, 14);
-    g.fillStyle(0x0088aa, 0.6); g.fillEllipse(tx + leanX * 0.6, ty - 4, 5, 8);
-    g.lineStyle(1.5, C.CYAN, 0.55);
+    g.fillStyle(cloaked ? 0x220044 : 0x003344, mainA); g.fillEllipse(tx + leanX * 0.6, ty - 3, 9, 14);
+    g.fillStyle(cloaked ? 0x6622aa : 0x0088aa, 0.6 * mainA); g.fillEllipse(tx + leanX * 0.6, ty - 4, 5, 8);
+    g.lineStyle(1.5, mainCol, 0.55 * mainA);
     g.strokeTriangle(tx + leanX, ty - 16, tx - 13, ty + 13, tx + 13, ty + 13);
-    g.fillStyle(0x0055cc, 0.9 * thr);
+    g.fillStyle(cloaked ? 0x4400aa : 0x0055cc, 0.9 * thr * mainA);
     g.fillTriangle(tx - 4, ty + 13, tx + 4, ty + 13, tx + leanX * 0.3, ty + 22 + thr * 8);
-    g.fillStyle(C.CYAN, 0.6 * thr);
+    g.fillStyle(mainCol, 0.6 * thr * mainA);
     g.fillTriangle(tx - 2.5, ty + 13, tx + 2.5, ty + 13, tx + leanX * 0.2, ty + 18 + thr * 6);
+    if (cloaked) {
+      // Cloak shimmer effect
+      const sh = 0.15 + 0.15 * Math.sin(now * 0.015);
+      g.lineStyle(2, 0xaa66ff, sh); g.strokeCircle(tx, ty, 24 + Math.sin(now * 0.008) * 4);
+    }
     if (this.shieldOn) {
       const pl = 0.35 + 0.35 * Math.sin(now * 0.012);
       g.lineStyle(3, C.CYAN, pl);     g.strokeCircle(tx, ty, 30);
