@@ -814,6 +814,13 @@ class GameScene extends Phaser.Scene {
     this.keys    = this.input.keyboard.addKeys('W,A,S,D,SPACE,Z');
     this.touch   = new TouchControls(this);
 
+    // Mobile: tap to advance dialog
+    if (IS_MOBILE) {
+      this.input.on('pointerdown', () => {
+        if (this.dialogActive) this.dialog.advance();
+      });
+    }
+
     this.cameras.main.fadeIn(600, 0, 0, 0);
     this.time.delayedCall(900, () => this._startWave(1));
   }
@@ -1231,7 +1238,7 @@ class GameScene extends Phaser.Scene {
     const T = this.touch;
     T.update();
 
-    // Dialog: Space advances, everything else blocked
+    // Dialog: Space or tap advances, everything else blocked
     if (this.dialogActive) {
       if (Phaser.Input.Keyboard.JustDown(K.SPACE)) this.dialog.advance();
       return;
