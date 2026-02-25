@@ -990,7 +990,7 @@ class GameScene extends Phaser.Scene {
       col: [0xffffff, 0x99ddff, 0xffccff][~~(Math.random() * 3)],
     }));
 
-    this.player = { x: W / 2, y: H - 100, spd: 290, alive: true, cooldown: 0, w: 26, h: 32, tilt: 0 };
+    this.player = { x: W / 2, y: H - 100, spd: 330, alive: true, cooldown: 0, w: 26, h: 32, tilt: 0 };
 
     this.pBullets  = [];
     this.enemies   = [];
@@ -1470,8 +1470,8 @@ class GameScene extends Phaser.Scene {
     // Touch joystick (HTML controls) - boosted curve for responsiveness
     if (IS_MOBILE && (Math.abs(T.dx) > 0.05 || Math.abs(T.dy) > 0.05)) {
       // Apply power curve: small tilt → already fast
-      const tdx = Math.sign(T.dx) * Math.pow(Math.abs(T.dx), 0.55);
-      const tdy = Math.sign(T.dy) * Math.pow(Math.abs(T.dy), 0.55);
+      const tdx = Math.sign(T.dx) * Math.pow(Math.abs(T.dx), 0.45);
+      const tdy = Math.sign(T.dy) * Math.pow(Math.abs(T.dy), 0.45);
       dx += tdx; dy += tdy;
     }
     const len = Math.sqrt(dx * dx + dy * dy);
