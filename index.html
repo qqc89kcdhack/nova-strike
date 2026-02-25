@@ -130,7 +130,7 @@ if (IS_MOBILE) {
       container.style.width = '100%';
       container.style.display = 'flex';
       container.style.justifyContent = 'center';
-      container.style.alignItems = 'center';
+      container.style.alignItems = 'flex-start';
     };
     resize();
     window.addEventListener('resize', resize);
@@ -2086,7 +2086,7 @@ new Phaser.Game({
   scene: [TitleScene, GameScene, GameOverScene, EndingScene],
   scale: {
     mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
+    autoCenter: IS_MOBILE ? Phaser.Scale.CENTER_HORIZONTALLY : Phaser.Scale.CENTER_BOTH,
   },
   render: { antialias: true, pixelArt: false },
 });
